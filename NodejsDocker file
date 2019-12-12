@@ -1,0 +1,82 @@
+#
+# CI/CD Docker for NodeJS based Bitbucket pipelines
+#
+
+#
+# You can specify a different node version, for example:
+#   $ docker build . --build-arg NODE_VERSION=8.2.1
+ARG NODE_VERSION=7.9.0
+FROM node:${NODE_VERSION}
+
+# Refresh repos and install apt https support
+RUN apt-get update && apt-get -y install apt-transport-https
+
+# Workaround for bug in NPM: 
+# - User "undefined" / "nobody" does not have permission to access the dir
+# ...when using node-gyp -- see: https://github.com/nodejs/node-gyp/issues/1236#issuecomment-309447800
+USER node
+RUN mkdir /home/node/.npm-global
+ENV PATH=/home/node/.npm-global/bin:$PATH
+ENV NPM_CONFIG_PREFIX=/home/node/.npm-global
+
+# Install Codacy Code Coverage plugin for NodeJS
+RUN npm install codacy-coverage nyc @angular/cli -g
+
+# Install the Black Duck CLI, using external JRE-8
+USER root
+RUN apt-get install -y debian-keyring debian-archive-keyring
+RUN echo "deb [check-valid-until=no] http://archive.debian.org/debian jessie-backports main" | tee /etc/apt/sources.list.d/debian-jessie-backports.list
+ADD config/debian-jessie-backports /etc/apt/preferences.d/
+
+RUN echo "deb [check-valid-until=no] http://cdn-fastly.deb.debian.org/debian jessie main" > /etc/apt/sources.list.d/jessie.list
+RUN sed -i '/deb http:\/\/deb.debian.org\/debian jessie-updates main/d' /etc/apt/sources.list
+RUN apt-get -o Acquire::Check-Valid-Until=false update
+
+RUN apt-get -y -t jessie-backports install ca-certificates-java openjdk-8-jre-headless
+ADD opt/scan.cli-4.1.0.tar.gz /opt/blackduck/
+
+# Install Cloud Foundry CLI
+RUN wget -q -O - https://packages.cloudfoundry.org/debian/cli.cloudfoundry.org.key | apt-key add -
+RUN echo "deb http://packages.cloudfoundry.org/debian stable main" | tee /etc/apt/sources.list.d/cloudfoundry-cli.list
+RUN apt-get update && apt-get -y install cf-cli
+
+# Install Google Chrome
+RUN wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add -
+RUN sh -c 'echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google.list'
+RUN apt-get update && apt-get install -y google-chrome-stable
+
+# Install Ionic
+RUN npm install -g ionic cordova
+
+# Install swagger codegen lib (JAR), using JRE-8 for this
+RUN mkdir -p /usr/share/swagger \
+  && curl -fsSL -o /usr/share/swagger/swagger-codegen-cli-2.3.1.jar \
+     http://central.maven.org/maven2/io/swagger/swagger-codegen-cli/2.3.1/swagger-codegen-cli-2.3.1.jar
+
+ENV SWAGGER_CODEGEN_LIB /usr/share/swagger/swagger-codegen-cli-2.3.1.jar
+
+# Install JQ
+ARG JQ_VERSION=1.5
+ARG BASE_URL=https://github.com/stedolan/jq/releases/download/jq-${JQ_VERSION}
+RUN mkdir -p /usr/share/jq \
+  && curl -fsSL -o /usr/share/jq/jq ${BASE_URL}/jq-linux64 \
+  && wait \
+  && chmod 755 /usr/share/jq/jq \
+  && ln -s /usr/share/jq/jq /usr/bin/jq
+
+# Install Taurus (Blazemeter) and dependencies
+ARG TAURUS_VERSION=1.12.1
+RUN apt-get install -y --no-install-recommends build-essential python python-setuptools python-tk python-pip python-dev \
+    libxml2-dev libxslt-dev zlib1g-dev net-tools && \
+    pip install bzt==${TAURUS_VERSION}
+
+# Install AWS CLI
+RUN pip install awscli
+
+# Install GNU GPG
+RUN apt-get install gnupg
+
+# Install scripts and dependencies
+ADD scripts /opt/intellect/bin/
+RUN chmod a+x /opt/intellect/bin/*.bash && \
+   for i in `ls /opt/intellect/bin/`; do ln -sf /opt/intellect/bin/$i /usr/local/bin/${i%.*}; done
