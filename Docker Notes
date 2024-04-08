@@ -1,0 +1,2 @@
+Copy--you can copy the files form your local to docker file (its the recomended one)
+ADD--this command has extra features you can extract inside the container just using the name itself and can dowload the file from internet into the docker file while build the image
